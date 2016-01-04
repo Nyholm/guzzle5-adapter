@@ -14,53 +14,106 @@ use Http\Adapter\Guzzle5HttpAdapter;
  */
 class Guzzle5ExceptionTest extends \PHPUnit_Framework_TestCase
 {
-    public function testGetException()
+    private $guzzleRequest;
+    private $guzzleResponse;
+
+    public function setUp()
     {
+        $this->guzzleRequest = new GuzzleRequest('GET', 'http://foo.com');
+        $this->guzzleResponse = new GuzzleResponse('400', [], Stream::factory('message body'), ['protocol_version'=>'1,1']);
+    }
+
+    protected function makeRequest(GuzzleExceptions\TransferException $exception)
+    {
+        $client = $this->getMock('GuzzleHttp\ClientInterface');
+        $client->expects($this->any())->method('send')->willThrowException($exception);
+        $client->expects($this->any())->method('createRequest')->willReturn($this->guzzleRequest);
+
         $request = new Psr7Request('GET', 'http://foo.com');
-        $guzzleRequest = new GuzzleRequest('GET', 'http://foo.com');
-        $guzzleResponse = new GuzzleResponse('400', [], Stream::factory('message body'), ['protocol_version'=>'1,1']);
+        (new Guzzle5HttpAdapter($client))->sendRequest($request);
+    }
 
-        $adapter = new Guzzle5HttpAdapter();
-        $method  = new \ReflectionMethod('Http\Adapter\Guzzle5HttpAdapter', 'handleException');
-        $method->setAccessible(true);
+    public function testConnectException()
+    {
+        // Guzzle's ConnectException should be converted to a NetworkException
+        $this->setExpectedException('Http\Client\Exception\NetworkException');
+        $this->makeRequest(new GuzzleExceptions\ConnectException('foo', $this->guzzleRequest));
+    }
 
-        $outputException = $method->invoke($adapter, new GuzzleExceptions\ConnectException('foo', $guzzleRequest), $request);
-        $this->assertInstanceOf('Http\Client\Exception\NetworkException', $outputException, "Guzzle's ConnectException should be converted to a NetworkException");
+    public function testTooManyRedirectsException()
+    {
+        // Guzzle's TooManyRedirectsException should be converted to a RequestException
+        $this->setExpectedException('Http\Client\Exception\RequestException');
+        $this->makeRequest(new GuzzleExceptions\TooManyRedirectsException('foo', $this->guzzleRequest));
+    }
 
-        $outputException = $method->invoke($adapter, new GuzzleExceptions\TooManyRedirectsException('foo', $guzzleRequest), $request);
-        $this->assertInstanceOf('Http\Client\Exception\RequestException', $outputException, "Guzzle's TooManyRedirectsException should be converted to a RequestException");
+    public function testRequestException()
+    {
+        // Guzzle's RequestException should be converted to a HttpException
+        $this->setExpectedException('Http\Client\Exception\HttpException');
+        $this->makeRequest(new GuzzleExceptions\RequestException('foo', $this->guzzleRequest, $this->guzzleResponse));
+    }
 
-        $outputException = $method->invoke($adapter, new GuzzleExceptions\RequestException('foo', $guzzleRequest, $guzzleResponse), $request);
-        $this->assertInstanceOf('Http\Client\Exception\HttpException', $outputException, "Guzzle's RequestException should be converted to a HttpException");
+    public function testRequestExceptionWithoutResponse()
+    {
+        // Guzzle's RequestException with no response should be converted to a RequestException
+        $this->setExpectedException('Http\Client\Exception\RequestException');
+        $this->makeRequest(new GuzzleExceptions\RequestException('foo', $this->guzzleRequest));
+    }
 
-        $outputException = $method->invoke($adapter, new GuzzleExceptions\BadResponseException('foo', $guzzleRequest, $guzzleResponse), $request);
-        $this->assertInstanceOf('Http\Client\Exception\HttpException', $outputException, "Guzzle's BadResponseException should be converted to a HttpException");
+    public function testBadResponseException()
+    {
+        // Guzzle's BadResponseException should be converted to a HttpException
+        $this->setExpectedException('Http\Client\Exception\HttpException');
+        $this->makeRequest(new GuzzleExceptions\BadResponseException('foo', $this->guzzleRequest, $this->guzzleResponse));
+    }
 
-        $outputException = $method->invoke($adapter, new GuzzleExceptions\ClientException('foo', $guzzleRequest, $guzzleResponse), $request);
-        $this->assertInstanceOf('Http\Client\Exception\HttpException', $outputException, "Guzzle's ClientException should be converted to a HttpException");
+    public function testBadResponseExceptionWithoutResponse()
+    {
+        // Guzzle's BadResponseException with no response should be converted to a RequestException
+        $this->setExpectedException('Http\Client\Exception\RequestException');
+        $this->makeRequest(new GuzzleExceptions\BadResponseException('foo', $this->guzzleRequest));
+    }
 
-        $outputException = $method->invoke($adapter, new GuzzleExceptions\ServerException('foo', $guzzleRequest, $guzzleResponse), $request);
-        $this->assertInstanceOf('Http\Client\Exception\HttpException', $outputException, "Guzzle's ServerException should be converted to a HttpException");
+    public function testClientException()
+    {
+        // Guzzle's ClientException should be converted to a HttpException
+        $this->setExpectedException('Http\Client\Exception\HttpException');
+        $this->makeRequest(new GuzzleExceptions\ClientException('foo', $this->guzzleRequest, $this->guzzleResponse));
+    }
 
-        $outputException = $method->invoke($adapter, new GuzzleExceptions\TransferException('foo'), $request);
-        $this->assertInstanceOf('Http\Client\Exception\TransferException', $outputException, "Guzzle's TransferException should be converted to a TransferException");
+    public function testClientExceptionWithoutResponse()
+    {
+        // Guzzle's ClientException with no response should be converted to a RequestException
+        $this->setExpectedException('Http\Client\Exception\RequestException');
+        $this->makeRequest(new GuzzleExceptions\ClientException('foo', $this->guzzleRequest));
+    }
 
-        $outputException = $method->invoke($adapter, new GuzzleExceptions\ParseException('foo', $guzzleResponse), $request);
-        $this->assertInstanceOf('Http\Client\Exception\TransferException', $outputException, "Guzzle's ParseException should be converted to a TransferException");
+    public function testServerException()
+    {
+        // Guzzle's ServerException should be converted to a HttpException
+        $this->setExpectedException('Http\Client\Exception\HttpException');
+        $this->makeRequest(new GuzzleExceptions\ServerException('foo', $this->guzzleRequest, $this->guzzleResponse));
+    }
 
-        /*
-         * Test RequestException without response
-         */
-        $outputException = $method->invoke($adapter, new GuzzleExceptions\RequestException('foo', $guzzleRequest), $request);
-        $this->assertInstanceOf('Http\Client\Exception\RequestException', $outputException, "Guzzle's RequestException with no response should be converted to a RequestException");
+    public function testServerExceptionWithoutResponse()
+    {
+        // Guzzle's ServerException with no response should be converted to a RequestException
+        $this->setExpectedException('Http\Client\Exception\RequestException');
+        $this->makeRequest(new GuzzleExceptions\BadResponseException('foo', $this->guzzleRequest));
+    }
 
-        $outputException = $method->invoke($adapter, new GuzzleExceptions\BadResponseException('foo', $guzzleRequest), $request);
-        $this->assertInstanceOf('Http\Client\Exception\RequestException', $outputException, "Guzzle's BadResponseException with no response should be converted to a RequestException");
+    public function testTransferException()
+    {
+        // Guzzle's TransferException should be converted to a TransferException
+        $this->setExpectedException('Http\Client\Exception\TransferException');
+        $this->makeRequest(new GuzzleExceptions\TransferException('foo'));
+    }
 
-        $outputException = $method->invoke($adapter, new GuzzleExceptions\ClientException('foo', $guzzleRequest), $request);
-        $this->assertInstanceOf('Http\Client\Exception\RequestException', $outputException, "Guzzle's ClientException with no response should be converted to a RequestException");
-
-        $outputException = $method->invoke($adapter, new GuzzleExceptions\ServerException('foo', $guzzleRequest), $request);
-        $this->assertInstanceOf('Http\Client\Exception\RequestException', $outputException, "Guzzle's ServerException with no response should be converted to a RequestException");
+    public function testParseException()
+    {
+        // Guzzle's ParseException should be converted to a TransferException
+        $this->setExpectedException('Http\Client\Exception\TransferException');
+        $this->makeRequest(new GuzzleExceptions\ParseException('foo', $this->guzzleResponse));
     }
 }
